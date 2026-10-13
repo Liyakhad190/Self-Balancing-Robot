@@ -1,0 +1,55 @@
+<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ATOM PID</title>
+<style>
+body{font-family:sans-serif;background:#111;color:#eee;max-width:480px;margin:auto;padding:12px}
+label{display:block;margin-top:14px}
+input[type=number]{width:90px;font-size:18px;margin-left:6px}
+input[type=range]{width:100%}
+button{font-size:16px;padding:10px 14px;margin:12px 6px 0 0}
+canvas{width:100%;height:120px;background:#000;margin-top:8px}
+</style></head><body>
+<h2>ATOM balance tuning</h2>
+<div>Angle: <b id="a">-</b>&deg; &nbsp; Output: <b id="o">-</b> &nbsp; Peak: <b id="pk">0</b> &nbsp; <b id="st">-</b></div>
+<canvas id="c" width="480" height="120"></canvas>
+<div style="font-size:13px;color:#aaa">Blue = angle, orange = motor output. Graph freezes when the robot falls, so you can read what happened.</div>
+<div id="ctl"></div>
+<button onclick="apply()">Apply</button>
+<button onclick="save()">Save to flash</button>
+<button onclick="toggle()">Run / Stop</button>
+<script>
+const P=[['kp','Kp',0,60,0.1],['ki','Ki',0,30,0.1],['kd','Kd',0,5,0.01],['sp','Setpoint (deg)',-10,10,0.1],['min','Min PWM',0,120,1],['kpb','Back Kp',0,60,0.1],['kdb','Back Kd',0,5,0.01]];
+let init=false,hist=[],histO=[],pk=0;
+const $=id=>document.getElementById(id);
+function build(d){
+  $('ctl').innerHTML=P.map(([k,n,lo,hi,s])=>
+   `<label>${n}: <input type="number" id="n_${k}" step="${s}" value="${d[k]}" oninput="$('r_${k}').value=this.value">
+    <input type="range" id="r_${k}" min="${lo}" max="${hi}" step="${s}" value="${d[k]}"
+     oninput="$('n_${k}').value=this.value" onchange="apply()"></label>`).join('');
+}
+function apply(){fetch('/set?'+P.map(([k])=>k+'='+$('n_'+k).value).join('&'));}
+function save(){fetch('/save');}
+function toggle(){fetch('/toggle');}
+function draw(){
+  const c=$('c'),g=c.getContext('2d');g.clearRect(0,0,480,120);
+  g.strokeStyle='#444';g.beginPath();g.moveTo(0,60);g.lineTo(480,60);g.stroke();
+  g.strokeStyle='#4af';g.beginPath();
+  hist.forEach((v,i)=>{const x=i*3.2,y=60-Math.max(-45,Math.min(45,v))*(60/45);i?g.lineTo(x,y):g.moveTo(x,y)});
+  g.stroke();
+  g.strokeStyle='#fa4';g.beginPath();
+  histO.forEach((v,i)=>{const x=i*3.2,y=60-Math.max(-255,Math.min(255,v))*(60/255);i?g.lineTo(x,y):g.moveTo(x,y)});
+  g.stroke();
+}
+async function tick(){
+  try{
+    const d=await (await fetch('/status')).json();
+    if(!init){build(d);init=true;}
+    $('a').textContent=d.angle.toFixed(1);
+    $('o').textContent=d.out.toFixed(0);
+    $('st').textContent=!d.enabled?'STOPPED':d.armed?'BALANCING':'WAITING (hold upright)';
+    if(d.armed&&d.enabled){hist.push(d.angle);histO.push(d.out);if(hist.length>150){hist.shift();histO.shift();}pk=Math.max(pk*0.995,Math.abs(d.out));}
+    $('pk').textContent=pk.toFixed(0);draw();
+  }catch(e){}
+  setTimeout(tick,80);
+}
+tick();
+</script></body></html>
